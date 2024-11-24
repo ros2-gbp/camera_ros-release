@@ -1,22 +1,22 @@
 #include "cv_to_pv.hpp"
+#include "type_extent.hpp"
 #include "types.hpp"
 #include <cstdint>
 #include <libcamera/base/span.h>
 #include <libcamera/controls.h>
 #include <libcamera/geometry.h>
 #include <rclcpp/parameter_value.hpp>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 
-#define CASE_CONVERT(T)                                                                            \
-  case libcamera::ControlType##T:                                                                  \
-    return cv_to_pv(extract_value<ControlTypeMap<libcamera::ControlType##T>::type>(value), extent);
+#define CASE_CONVERT(T)           \
+  case libcamera::ControlType##T: \
+    return cv_to_pv(extract_value<ControlTypeMap<libcamera::ControlType##T>::type>(value));
 
-#define CASE_NONE(T)                                                                               \
-  case libcamera::ControlType##T:                                                                  \
+#define CASE_NONE(T)              \
+  case libcamera::ControlType##T: \
     return {};
 
 
@@ -33,9 +33,9 @@ extract_value(const libcamera::ControlValue &value)
   }
 }
 
-template<typename T,
-         std::enable_if_t<std::is_arithmetic<T>::value || std::is_same<std::string, T>::value,
-                          bool> = true>
+template<
+  typename T,
+  std::enable_if_t<std::is_arithmetic<T>::value || std::is_same<std::string, T>::value, bool> = true>
 rclcpp::ParameterValue
 cv_to_pv_array(const std::vector<T> &values)
 {
@@ -48,12 +48,12 @@ template<typename T,
 rclcpp::ParameterValue
 cv_to_pv_array(const std::vector<T> & /*values*/)
 {
-  throw std::runtime_error("ParameterValue only supported for arithmetic types");
+  throw invalid_conversion("ParameterValue only supported for arithmetic types");
 }
 
-template<typename T,
-         std::enable_if_t<std::is_arithmetic<T>::value || std::is_same<std::string, T>::value,
-                          bool> = true>
+template<
+  typename T,
+  std::enable_if_t<std::is_arithmetic<T>::value || std::is_same<std::string, T>::value, bool> = true>
 rclcpp::ParameterValue
 cv_to_pv_scalar(const T &value)
 {
@@ -75,26 +75,23 @@ cv_to_pv_scalar(const libcamera::Size &size)
 
 template<typename T>
 rclcpp::ParameterValue
-cv_to_pv(const std::vector<T> &values, const std::size_t &extent)
+cv_to_pv(const std::vector<T> &values)
 {
-  if ((values.size() > 1 && extent > 1) && (values.size() != extent))
-    throw std::runtime_error("type extent (" + std::to_string(extent) + ") and value size (" +
-                             std::to_string(values.size()) +
-                             ") cannot be larger than 1 and differ");
-
-  if (values.size() > 1)
-    return cv_to_pv_array(values);
-  else if (values.size() == 1)
-    if (!extent)
-      return cv_to_pv_scalar(values[0]);
-    else
-      return cv_to_pv_array(std::vector<T>(extent, values[0]));
-  else
+  switch (values.size()) {
+  case 0:
+    // empty array
     return rclcpp::ParameterValue();
+  case 1:
+    // single element (scalar)
+    return cv_to_pv_scalar(values[0]);
+  default:
+    // dynamic array
+    return cv_to_pv_array(values);
+  }
 }
 
 rclcpp::ParameterValue
-cv_to_pv(const libcamera::ControlValue &value, const std::size_t &extent)
+cv_to_pv(const libcamera::ControlValue &value)
 {
   switch (value.type()) {
     CASE_NONE(None)
@@ -112,10 +109,10 @@ cv_to_pv(const libcamera::ControlValue &value, const std::size_t &extent)
 }
 
 rclcpp::ParameterType
-cv_to_pv_type(const libcamera::ControlType &type, const bool is_array)
+cv_to_pv_type(const libcamera::ControlId *const id)
 {
-  if (!is_array) {
-    switch (type) {
+  if (get_extent(id) == 0) {
+    switch (id->type()) {
     case libcamera::ControlType::ControlTypeNone:
       return rclcpp::ParameterType::PARAMETER_NOT_SET;
     case libcamera::ControlType::ControlTypeBool:
@@ -135,7 +132,7 @@ cv_to_pv_type(const libcamera::ControlType &type, const bool is_array)
     }
   }
   else {
-    switch (type) {
+    switch (id->type()) {
     case libcamera::ControlType::ControlTypeNone:
       return rclcpp::ParameterType::PARAMETER_NOT_SET;
     case libcamera::ControlType::ControlTypeBool:
