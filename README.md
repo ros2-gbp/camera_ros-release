@@ -1,3 +1,26 @@
+## camera_ros (humble) - 0.2.0-1
+
+The packages in the `camera_ros` repository were released into the `humble` distro by running `/usr/bin/bloom-release --rosdistro humble camera_ros` on `Sun, 24 Nov 2024 11:23:37 -0000`
+
+The `camera_ros` package was released.
+
+Version of package(s) in repository `camera_ros`:
+
+- upstream repository: https://github.com/christianrauch/camera_ros.git
+- release repository: https://github.com/ros2-gbp/camera_ros-release.git
+- rosdistro version: `0.1.0-2`
+- old version: `0.1.0-2`
+- new version: `0.2.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.12.0`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.24.0`
+- rosdistro version: `0.9.1`
+- vcstools version: `0.1.42`
+
+
 ## camera_ros (humble) - 0.1.0-2
 
 The packages in the `camera_ros` repository were released into the `humble` distro by running `/home/christian/.local/bin/bloom-release --rosdistro humble --track humble camera_ros` on `Tue, 11 Apr 2023 05:19:17 -0000`
