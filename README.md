@@ -1,3 +1,26 @@
+## camera_ros (rolling) - 0.2.0-1
+
+The packages in the `camera_ros` repository were released into the `rolling` distro by running `/usr/bin/bloom-release --rosdistro rolling camera_ros` on `Sun, 24 Nov 2024 11:35:35 -0000`
+
+The `camera_ros` package was released.
+
+Version of package(s) in repository `camera_ros`:
+
+- upstream repository: https://github.com/christianrauch/camera_ros.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `0.2.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.12.0`
+- catkin_pkg version: `1.0.0`
+- rosdep version: `0.24.0`
+- rosdistro version: `0.9.1`
+- vcstools version: `0.1.42`
+
+
 ## camera_ros (jazzy) - 0.2.0-1
 
 The packages in the `camera_ros` repository were released into the `jazzy` distro by running `/usr/bin/bloom-release --rosdistro jazzy camera_ros` on `Sun, 24 Nov 2024 11:32:22 -0000`
