@@ -1,0 +1,12 @@
+Source: ros-jazzy-camera-ros
+Section: misc
+Priority: optional
+Maintainer: Christian Rauch <Rauch.Christian@gmx.de>
+Build-Depends: debhelper (>= 9.0.0), ros-jazzy-ament-cmake, ros-jazzy-ament-cmake-clang-format <!nocheck>, ros-jazzy-ament-cmake-cppcheck <!nocheck>, ros-jazzy-ament-cmake-flake8 <!nocheck>, ros-jazzy-ament-cmake-lint-cmake <!nocheck>, ros-jazzy-ament-cmake-mypy <!nocheck>, ros-jazzy-ament-cmake-pep257 <!nocheck>, ros-jazzy-ament-cmake-pyflakes <!nocheck>, ros-jazzy-ament-cmake-xmllint <!nocheck>, ros-jazzy-ament-lint-auto <!nocheck>, ros-jazzy-camera-info-manager, ros-jazzy-cv-bridge, ros-jazzy-libcamera (>= 0.1), ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-sensor-msgs, ros-jazzy-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-camera-ros
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-jazzy-ament-index-python, ros-jazzy-camera-info-manager, ros-jazzy-cv-bridge, ros-jazzy-image-view, ros-jazzy-libcamera (>= 0.1), ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-ros2launch, ros-jazzy-sensor-msgs, ros-jazzy-ros-workspace
+Description: node for libcamera supported cameras (V4L2, Raspberry Pi Camera Modules)
