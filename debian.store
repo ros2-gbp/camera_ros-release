@@ -1,1 +1,1 @@
-{"base": "d660cd0", "parent": "debian/rolling/camera_ros", "previous": "a59d79b", "trim": "", "trimbase": ""}
+{"base": "56d256123563", "parent": "debian/kilted/camera_ros", "previous": "374ea930ed0f", "trim": "", "trimbase": ""}
