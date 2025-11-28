@@ -95,8 +95,7 @@ private:
   };
   std::unordered_map<const libcamera::FrameBuffer *, buffer_info_t> buffer_info;
 
-  // timestamp offset (ns) from camera time to system time
-  int64_t time_offset = 0;
+  bool use_node_time;
 
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_image;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr pub_image_compressed;
@@ -222,7 +221,19 @@ compressImageMsg(const sensor_msgs::msg::Image &source,
 
 CameraNode::CameraNode(const rclcpp::NodeOptions &options)
     : Node("camera", options),
+#if CIM_HAS_NODE_INTERFACE
+      cim(
+        this->get_node_base_interface(),
+        this->get_node_services_interface(),
+        this->get_node_logging_interface()
+#if CIM_HAS_QoS
+          ,
+        "camera", {}, rclcpp::SystemDefaultsQoS()
+#endif
+          ),
+#else
       cim(this),
+#endif
       parameter_handler(this),
       param_cb_change(
 #ifdef RCLCPP_HAS_PARAM_EXT_CB
@@ -306,6 +317,12 @@ CameraNode::CameraNode(const rclcpp::NodeOptions &options)
     // default to 95
     jpeg_quality = declare_parameter<uint8_t>("jpeg_quality", 95, jpeg_quality_description);
   }
+
+  // use_node_time parameter
+  rcl_interfaces::msg::ParameterDescriptor param_descr_use_node_time;
+  param_descr_use_node_time.description = "use node time instead of sensor timestamp for image messages";
+  param_descr_use_node_time.read_only = true;
+  use_node_time = declare_parameter<bool>("use_node_time", false, param_descr_use_node_time);
 
   // publisher for raw and compressed image
   pub_image = this->create_publisher<sensor_msgs::msg::Image>("~/image_raw", 1);
@@ -475,9 +492,9 @@ CameraNode::CameraNode(const rclcpp::NodeOptions &options)
   // format camera name for calibration file
   const libcamera::ControlList &props = camera->properties();
   std::string cname = camera->id() + '_' + scfg.size.toString();
-  const std::optional<std::string> model = props.get(libcamera::properties::Model);
-  if (model)
-    cname = model.value() + '_' + cname;
+  if (const std::optional<std::string_view> model = props.get(libcamera::properties::Model)) {
+    cname = static_cast<std::string>(model.value()) + '_' + cname;
+  }
   if (!sensor_size.isNull() && role != libcamera::StreamRole::Raw)
     cname = cname + '_' + cfg->at(1).toString();
 
@@ -619,14 +636,26 @@ CameraNode::process(libcamera::Request *const request)
       for (const libcamera::FrameMetadata::Plane &plane : metadata.planes())
         bytesused += plane.bytesused;
 
-      // set time offset once for accurate timing using the device time
-      if (time_offset == 0)
-        time_offset = this->now().nanoseconds() - metadata.timestamp;
-
-      // send image data
+      // prepare message header
       std_msgs::msg::Header hdr;
-      hdr.stamp = rclcpp::Time(time_offset + int64_t(metadata.timestamp));
       hdr.frame_id = frame_id;
+
+      // if using sensor timestamps, get the sensor timestamp from the request metadata
+      int64_t sensor_latency = 0;
+      if (!use_node_time) {
+        const libcamera::ControlList &req_metadata = request->metadata();
+        if (const std::optional<int64_t> sensor_ts = req_metadata.get(libcamera::controls::SensorTimestamp)) {
+          sensor_latency = rclcpp::Clock(RCL_STEADY_TIME).now().nanoseconds() - sensor_ts.value();
+        }
+        else {
+          RCLCPP_WARN_STREAM_ONCE(get_logger(), "sensor timestamp not available, falling back to node time as reference");
+        }
+      }
+
+      // Adjust timestamp by the sensor latency
+      hdr.stamp = this->now() - rclcpp::Duration::from_nanoseconds(sensor_latency);
+
+      // prepare image messages
       const libcamera::StreamConfiguration &cfg = stream->configuration();
 
       auto msg_img = std::make_unique<sensor_msgs::msg::Image>();
