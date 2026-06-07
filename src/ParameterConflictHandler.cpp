@@ -87,10 +87,6 @@ is_set(const ParameterConflictHandler::ParameterValueMap &p,
   return p.count(name) && (p.at(name).get_type() != rclcpp::ParameterType::PARAMETER_NOT_SET);
 }
 
-ParameterConflictHandler::ParameterConflictHandler()
-{
-}
-
 std::vector<std::string>
 ParameterConflictHandler::resolve_defaults(ParameterValueMap &p)
 {
@@ -134,8 +130,7 @@ ParameterConflictHandler::resolve_overrides(ParameterValueMap &p)
   // restore 'ExposureTime'
   if (is_set(p, HAS_ETM ? ETM : AE) &&
       (HAS_ETM ? (p.at(ETM).get<int32_t>() == ETM_Manual) : !p.at(AE).get<bool>()) &&
-      !is_set(p, ET) && store.count(ET))
-  {
+      !is_set(p, ET) && store.count(ET)) {
     p.at(ET) = store.at(ET);
     store.erase(ET);
   }
@@ -173,7 +168,8 @@ ParameterConflictHandler::restore(std::vector<rclcpp::Parameter> &parameters)
   if (is_set(parameters, (HAS_ETM ? ETM : AE))) {
     // restore 'ExposureTime' when 'AeEnable' is off
     if (HAS_ETM ? is_int_eq(parameters, ETM, ETM_Manual) : !is_true(parameters, AE)) {
-      if (tmp_store.count(ET)) {
+      //  ... and it has not been set yet
+      if (tmp_store.count(ET) && !is_set(parameters, ET)) {
         parameters.push_back({ET, tmp_store.at(ET)});
         tmp_store.erase(ET);
       }
