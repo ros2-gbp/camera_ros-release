@@ -15,6 +15,7 @@
 #include <cv_bridge/cv_bridge.h>
 #endif
 #include <atomic>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <iostream>
 #include <libcamera/base/shared_fd.h>
 #include <libcamera/base/signal.h>
@@ -97,9 +98,12 @@ private:
 
   bool use_node_time;
 
+  static const rclcpp::PublisherOptionsWithAllocator<std::allocator<void>> pubopts;
+
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_image;
   rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr pub_image_compressed;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr pub_ci;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr pub_diagnostics;
 
   camera_info_manager::CameraInfoManager cim;
 
@@ -133,6 +137,15 @@ private:
 
 RCLCPP_COMPONENTS_REGISTER_NODE(camera::CameraNode)
 
+const rclcpp::PublisherOptionsWithAllocator<std::allocator<void>> CameraNode::pubopts = []() {
+  rclcpp::PublisherOptionsWithAllocator<std::allocator<void>> options;
+  options.qos_overriding_options = rclcpp::QosOverridingOptions {
+    rclcpp::QosPolicyKind::Depth,
+    rclcpp::QosPolicyKind::Durability,
+    rclcpp::QosPolicyKind::History,
+    rclcpp::QosPolicyKind::Reliability};
+  return options;
+}();
 
 libcamera::StreamRole
 get_role(const std::string &role)
@@ -198,8 +211,7 @@ compressImageMsg(const sensor_msgs::msg::Image &source,
   destination.header = source.header;
   cv::Mat image;
   if (cv_ptr->encoding == enc::BGR8 || cv_ptr->encoding == enc::BGRA8 ||
-      cv_ptr->encoding == enc::MONO8 || cv_ptr->encoding == enc::MONO16)
-  {
+      cv_ptr->encoding == enc::MONO8 || cv_ptr->encoding == enc::MONO16) {
     image = cv_ptr->image;
   }
   else {
@@ -325,13 +337,17 @@ CameraNode::CameraNode(const rclcpp::NodeOptions &options)
   use_node_time = declare_parameter<bool>("use_node_time", false, param_descr_use_node_time);
 
   // publisher for raw and compressed image
-  pub_image = this->create_publisher<sensor_msgs::msg::Image>("~/image_raw", 1);
+  pub_image = this->create_publisher<sensor_msgs::msg::Image>("~/image_raw", 1, pubopts);
   pub_image_compressed =
-    this->create_publisher<sensor_msgs::msg::CompressedImage>("~/image_raw/compressed", 1);
-  pub_ci = this->create_publisher<sensor_msgs::msg::CameraInfo>("~/camera_info", 1);
+    this->create_publisher<sensor_msgs::msg::CompressedImage>("~/image_raw/compressed", 1, pubopts);
+  pub_ci = this->create_publisher<sensor_msgs::msg::CameraInfo>("~/camera_info", 1, pubopts);
+  pub_diagnostics =
+    this->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 1);
 
   // start camera manager and check for cameras
-  camera_manager.start();
+  const int ec_start = camera_manager.start();
+  if (ec_start < 0)
+    throw std::runtime_error("failed to start camera manager: " + std::string(std::strerror(-ec_start)));
   if (camera_manager.cameras().empty())
     throw std::runtime_error("no cameras available");
 
@@ -523,7 +539,11 @@ CameraNode::CameraNode(const rclcpp::NodeOptions &options)
   stream = scfg.stream();
 
   allocator = std::make_shared<libcamera::FrameBufferAllocator>(camera);
-  allocator->allocate(stream);
+  const int nbuffer = allocator->allocate(stream);
+
+  if (nbuffer < 0) {
+    throw std::runtime_error("allocation failed: " + std::string(std::strerror(-nbuffer)));
+  }
 
   for (const std::unique_ptr<libcamera::FrameBuffer> &buffer : allocator->buffers(stream)) {
     std::unique_ptr<libcamera::Request> request = camera->createRequest();
@@ -556,6 +576,8 @@ CameraNode::CameraNode(const rclcpp::NodeOptions &options)
 
     requests.push_back(std::move(request));
   }
+
+  assert(nbuffer >= 0 && requests.size() == size_t(nbuffer));
 
   // create a processing thread per request
   running = true;
@@ -598,11 +620,17 @@ CameraNode::~CameraNode()
     thread.join();
 
   // stop camera
-  if (camera->stop())
-    std::cerr << "failed to stop camera" << std::endl;
-  allocator->free(stream);
+  if (camera->stop()) {
+    RCLCPP_ERROR_STREAM(get_logger(), "failed to stop camera");
+  }
+  const int ec_alloc_free = allocator->free(stream);
+  if (ec_alloc_free < 0) {
+    RCLCPP_ERROR_STREAM(get_logger(), "failed to free buffers: " << std::strerror(-ec_alloc_free));
+  }
   allocator.reset();
-  camera->release();
+  if (camera->release() < 0) {
+    RCLCPP_ERROR_STREAM(get_logger(), "camera is busy and cannot be released");
+  }
   camera.reset();
   camera_manager.stop();
   for (const auto &e : buffer_info)
@@ -628,8 +656,46 @@ CameraNode::process(libcamera::Request *const request)
     if (!running)
       return;
 
+    // prepare message header
+    std_msgs::msg::Header hdr;
+    hdr.frame_id = frame_id;
+
+    // if using sensor timestamps, get the sensor timestamp from the request metadata
+    int64_t sensor_latency = 0;
+    if (!use_node_time) {
+      const libcamera::ControlList &req_metadata = request->metadata();
+      if (const std::optional<int64_t> sensor_ts = req_metadata.get(libcamera::controls::SensorTimestamp)) {
+        sensor_latency = rclcpp::Clock(RCL_STEADY_TIME).now().nanoseconds() - sensor_ts.value();
+      }
+      else {
+        RCLCPP_WARN_STREAM_ONCE(get_logger(), "sensor timestamp not available, falling back to node time as reference");
+      }
+    }
+
+    // Adjust timestamp by the sensor latency
+    hdr.stamp = this->now() - rclcpp::Duration::from_nanoseconds(sensor_latency);
+
+    diagnostic_msgs::msg::DiagnosticArray diagnostic_array;
+    diagnostic_array.header = hdr;
+
+    diagnostic_msgs::msg::DiagnosticStatus diagnostic_status;
+    diagnostic_status.hardware_id = camera->id();
+
     if (request->status() == libcamera::Request::RequestComplete) {
       assert(request->buffers().size() == 1);
+
+      diagnostic_status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+
+      // publish metadata, sorted by control ID
+      for (const auto &[id, value] : std::map {
+             request->metadata().begin(),
+             request->metadata().end(),
+           }) {
+        diagnostic_msgs::msg::KeyValue kv;
+        kv.key = libcamera::controls::controls.at(id)->name();
+        kv.value = value.toString();
+        diagnostic_status.values.push_back(kv);
+      }
 
       // get the stream and buffer from the request
       const libcamera::FrameBuffer *buffer = request->findBuffer(stream);
@@ -637,25 +703,6 @@ CameraNode::process(libcamera::Request *const request)
       size_t bytesused = 0;
       for (const libcamera::FrameMetadata::Plane &plane : metadata.planes())
         bytesused += plane.bytesused;
-
-      // prepare message header
-      std_msgs::msg::Header hdr;
-      hdr.frame_id = frame_id;
-
-      // if using sensor timestamps, get the sensor timestamp from the request metadata
-      int64_t sensor_latency = 0;
-      if (!use_node_time) {
-        const libcamera::ControlList &req_metadata = request->metadata();
-        if (const std::optional<int64_t> sensor_ts = req_metadata.get(libcamera::controls::SensorTimestamp)) {
-          sensor_latency = rclcpp::Clock(RCL_STEADY_TIME).now().nanoseconds() - sensor_ts.value();
-        }
-        else {
-          RCLCPP_WARN_STREAM_ONCE(get_logger(), "sensor timestamp not available, falling back to node time as reference");
-        }
-      }
-
-      // Adjust timestamp by the sensor latency
-      hdr.stamp = this->now() - rclcpp::Duration::from_nanoseconds(sensor_latency);
 
       // prepare image messages
       const libcamera::StreamConfiguration &cfg = stream->configuration();
@@ -711,8 +758,13 @@ CameraNode::process(libcamera::Request *const request)
       pub_ci->publish(ci);
     }
     else if (request->status() == libcamera::Request::RequestCancelled) {
+      diagnostic_status.level = diagnostic_msgs::msg::DiagnosticStatus::WARN;
       RCLCPP_ERROR_STREAM(get_logger(), "request '" << request->toString() << "' cancelled");
     }
+
+    diagnostic_array.status.push_back(diagnostic_status);
+
+    pub_diagnostics->publish(diagnostic_array);
 
     // redeclare implicitly undeclared parameters
     parameter_handler.redeclare();
@@ -721,13 +773,17 @@ CameraNode::process(libcamera::Request *const request)
     request->reuse(libcamera::Request::ReuseBuffers);
     parameter_handler.move_control_values(request->controls());
 
+    for (const auto &[id, value] : request->controls()) {
+      const std::string &name = libcamera::controls::controls.at(id)->name();
+      RCLCPP_DEBUG_STREAM(get_logger(), "applied control '" << name << "': " << (value.isNone() ? "NONE" : value.toString()));
+    }
+
     if (const int ret = camera->queueRequest(request); ret < 0) {
       RCLCPP_WARN_STREAM(get_logger(), "failed to queue request (" << request->toString() << "): " << strerror(-ret));
     }
 
-    for (const auto &[id, value] : request->controls()) {
-      const std::string &name = libcamera::controls::controls.at(id)->name();
-      RCLCPP_DEBUG_STREAM(get_logger(), "applied control '" << name << "': " << (value.isNone() ? "NONE" : value.toString()));
+    if (!parameter_handler.sync_control_values(request->controls())) {
+      RCLCPP_WARN_STREAM(get_logger(), "Failed to synchronise control values of queued request!");
     }
   }
 }
