@@ -1,3 +1,26 @@
+## camera_ros (humble) - 0.8.0-1
+
+The packages in the `camera_ros` repository were released into the `humble` distro by running `/usr/bin/bloom-release camera_ros --rosdistro humble` on `Thu, 05 Nov 2026 22:23:26 -0000`
+
+The `camera_ros` package was released.
+
+Version of package(s) in repository `camera_ros`:
+
+- upstream repository: https://github.com/christianrauch/camera_ros.git
+- release repository: https://github.com/ros2-gbp/camera_ros-release.git
+- rosdistro version: `0.7.0-1`
+- old version: `0.7.0-1`
+- new version: `0.8.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.1`
+- rosdep version: `0.27.0`
+- rosdistro version: `1.1.0`
+- vcstools version: `0.1.42`
+
+
 ## camera_ros (jazzy) - 0.8.0-1
 
 The packages in the `camera_ros` repository were released into the `jazzy` distro by running `/usr/bin/bloom-release camera_ros --rosdistro jazzy` on `Thu, 05 Nov 2026 22:19:56 -0000`
